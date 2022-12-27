@@ -84,7 +84,9 @@ ENV APACHE_CONFDIR=/etc/apache2 \
 
 RUN --mount=type=cache,target=/var/cache,sharing=locked \
     --mount=type=cache,target=/root/.cache \
-    apt-get update \
+    printf "deb http://security.ubuntu.com/ubuntu/ kinetic main restricted universe\ndeb http://security.ubuntu.com/ubuntu/ kinetic-security main restricted universe" > /etc/apt/sources.list.d/backports.list \
+    && printf "Package: *\nPin: release n=jammy\nPin-Priority: -10\n\nPackage: *apache2*\nPin: release n=kinetic\nPin-Priority: 500" > /etc/apt/preferences.d/apache.pref \
+    && apt-get update \
     && apt-get upgrade --assume-yes \
     && apt-get install --assume-yes --no-install-recommends ca-certificates apache2 libapache2-mod-fcgid curl \
         libfribidi0 librsvg2-2 libpng16-16 libgif7 libfcgi0ldbl \
