@@ -20,14 +20,13 @@ to tune it:
 - `MIN_PROCESSES`: The minimum number of fcgi processes to keep (defaults to `1`)
 - `MAX_PROCESSES`: The maximum number of fcgi processes to keep (defaults to `5`)
 - `MAPSERVER_CATCH_SEGV`: Set to `1` to have the stacktraces in case of crash
-- `LISTEN_PORT_80`: When running the container as an unprivileged user, apache
-  will listen to port `8080` instead of `80`. Set to `1` force listening to port `80`
-  instead.
 - `BUSY_TIMEOUT`: The maximum time limit for request handling (defaults to `300`)
 - `IDLE_TIMEOUT`: Application processes which have not handled a request for
   this period of time will be terminated (defaults to `300`)
 - `IO_TIMEOUT`: The maximum period of time the module will wait while trying to
   read from or write to a FastCGI application (defaults to `40`)
+- `APACHE_LIMIT_REQUEST_LINE`: The maximum size of the HTTP request line in
+  bytes (defaults to `8190`)
 
 ## Running multiple Mapfiles
 
@@ -64,3 +63,12 @@ your query string.
 - `confd` and `entrypoints.d` are removed, you should replace it by a `volume_from` a configuration image
   or an init container.
 - The `MS_MAPFILE` has no more default value, was `/etc/mapserver/mapserver.map`.
+
+## Contributing
+
+Install the pre-commit hooks:
+
+```bash
+pip install pre-commit
+pre-commit install --allow-missing-config
+```

@@ -1,4 +1,4 @@
-FROM osgeo/gdal:ubuntu-small-3.6.0 as builder
+FROM ghcr.io/osgeo/gdal:ubuntu-small-3.7.0 as builder
 LABEL maintainer Camptocamp "info@camptocamp.com"
 SHELL ["/bin/bash", "-o", "pipefail", "-cux"]
 
@@ -66,7 +66,7 @@ RUN if test "${WITH_ORACLE}" = "ON"; then \
 RUN ninja install \
     && if test "${WITH_ORACLE}" = "ON"; then rm -rf /usr/local/lib/sdk; fi
 
-FROM osgeo/gdal:ubuntu-small-3.6.0 as runner
+FROM ghcr.io/osgeo/gdal:ubuntu-small-3.7.0 as runner
 LABEL maintainer Camptocamp "info@camptocamp.com"
 SHELL ["/bin/bash", "-o", "pipefail", "-cux"]
 
@@ -88,24 +88,24 @@ RUN --mount=type=cache,target=/var/cache,sharing=locked \
     && printf "Package: *\nPin: release n=jammy\nPin-Priority: -10\n\nPackage: *apache2*\nPin: release n=kinetic\nPin-Priority: 500" > /etc/apt/preferences.d/apache.pref \
     && apt-get update \
     && apt-get upgrade --assume-yes \
-    && apt-get install --assume-yes --no-install-recommends ca-certificates apache2 libapache2-mod-fcgid curl \
+    && apt-get install --assume-yes --no-install-recommends ca-certificates apache2 libapache2-mod-fcgid \
         libfribidi0 librsvg2-2 libpng16-16 libgif7 libfcgi0ldbl \
-        libxslt1.1 libprotobuf-c1 libcap2-bin libaio1 glibc-tools \
-    && echo 'Allow apache2 to bind to port <1024 for any user' \
-    && setcap cap_net_bind_service=+ep /usr/sbin/apache2 \
-    && apt-get --purge autoremove --yes curl libcap2-bin
+        libxslt1.1 libprotobuf-c1 libaio1 glibc-tools
 
 RUN a2enmod fcgid headers status \
     && a2dismod -f auth_basic authn_file authn_core authz_user autoindex dir \
     && rm /etc/apache2/mods-enabled/alias.conf \
-    && mkdir --parent ${APACHE_RUN_DIR} ${APACHE_LOCK_DIR} ${APACHE_LOG_DIR} /etc/mapserver \
+    && mkdir --mode=go+w --parent ${APACHE_RUN_DIR} ${APACHE_LOCK_DIR} \
+    && mkdir --parent /etc/mapserver \
+    && chmod o+w /var/lib/apache2/fcgid /var/lib/apache2/fcgid/sock \
     && find "$APACHE_CONFDIR" -type f -exec sed -ri ' \
     s!^(\s*CustomLog)\s+\S+!\1 /proc/self/fd/1!g; \
     s!^(\s*ErrorLog)\s+\S+!\1 /proc/self/fd/2!g; \
     ' '{}' ';' \
     && sed -ri 's!LogFormat "(.*)" combined!LogFormat "%{us}T %{X-Request-Id}i \1" combined!g' /etc/apache2/apache2.conf \
     && echo 'ErrorLogFormat "%{X-Request-Id}i [%l] [pid %P] %M"' >> /etc/apache2/apache2.conf \
-    && mkdir --parent /etc/mapserver
+    && sed -i -e 's/<VirtualHost \*:80>/<VirtualHost *:8080>/' /etc/apache2/sites-available/000-default.conf \
+    && sed -i -e 's/Listen 80$/Listen 8080/' /etc/apache2/ports.conf
 
 EXPOSE 8080
 
@@ -127,11 +127,8 @@ ENV MS_DEBUGLEVEL=0 \
     BUSY_TIMEOUT=300 \
     IDLE_TIMEOUT=300 \
     IO_TIMEOUT=40 \
+    APACHE_LIMIT_REQUEST_LINE=8190 \
     GET_ENV=env
-
-RUN adduser www-data root \
-    && chmod -R g+w ${APACHE_CONFDIR} ${APACHE_RUN_DIR} ${APACHE_LOCK_DIR} ${APACHE_LOG_DIR} /etc/mapserver /var/lib/apache2/fcgid /var/log \
-    && chgrp -R root ${APACHE_LOG_DIR} /var/lib/apache2/fcgid
 
 CMD ["/usr/local/bin/start-server"]
 

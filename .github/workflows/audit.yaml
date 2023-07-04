@@ -14,10 +14,9 @@ jobs:
       fail-fast: false
       matrix:
         branch:
-          - '7.2'
           - '7.4'
           - '7.6'
-          - '7.6-20-04'
+          - 7.6-20-04
           - '8.0'
 
     steps:

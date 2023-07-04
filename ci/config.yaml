@@ -1,6 +1,4 @@
 checks:
-  versions:
-    audit: False
   codespell:
     ignore_re:
       - (.*/)?poetry\.lock
@@ -19,6 +17,7 @@ publish:
   pypi:
     packages: []
   docker:
+    dispatch: {}
     images:
       - name: camptocamp/mapserver
         tags:
