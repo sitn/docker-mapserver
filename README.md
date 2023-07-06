@@ -72,3 +72,9 @@ Install the pre-commit hooks:
 pip install pre-commit
 pre-commit install --allow-missing-config
 ```
+
+## Build
+
+```bash
+docker build -t sitn/mapserver:8.0 --build-arg MAPSERVER_BRANCH=branch-8-0 .
+```

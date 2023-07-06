@@ -2,11 +2,18 @@ FROM ghcr.io/osgeo/gdal:ubuntu-small-3.7.0 as builder
 LABEL maintainer Camptocamp "info@camptocamp.com"
 SHELL ["/bin/bash", "-o", "pipefail", "-cux"]
 
+ARG APACHE_VERSION=2.4.57
+ARG APR_VERSION=1.7.4
+ARG APR_UTIL_VERSION=1.6.3
+ARG FCGID_VERSION=2.3.9
+ARG APACHE_BUILD_DIR=/src/httpd
+
 RUN --mount=type=cache,target=/var/cache,sharing=locked \
     --mount=type=cache,target=/root/.cache \
     apt-get update \
     && apt-get upgrade --assume-yes \
     && DEBIAN_FRONTEND=noninteractive apt-get install --assume-yes --no-install-recommends bison \
+        libpcre3-dev libapr1-dev libaprutil1-dev build-essential libssl-dev libexpat-dev lbzip2 \
         flex python3-lxml libfribidi-dev swig \
         cmake librsvg2-dev colordiff libpq-dev libpng-dev libjpeg-dev libgif-dev libgeos-dev libgd-dev \
         libfreetype6-dev libfcgi-dev libcurl4-gnutls-dev libcairo2-dev libxml2-dev \
@@ -14,13 +21,36 @@ RUN --mount=type=cache,target=/var/cache,sharing=locked \
         clang libprotobuf-c-dev protobuf-c-compiler libharfbuzz-dev libcairo2-dev librsvg2-dev \
     && ln -s /usr/local/lib/libproj.so.* /usr/local/lib/libproj.so
 
+RUN mkdir -p ${APACHE_BUILD_DIR} \
+    && cd ${APACHE_BUILD_DIR} \
+    && curl -sSLo /src/httpd/httpd.tar.bz2 https://dlcdn.apache.org/httpd/httpd-${APACHE_VERSION}.tar.bz2 \
+    && tar -xf httpd.tar.bz2 \
+    && curl -sSLo /src/httpd/apr.tar.bz2 https://dlcdn.apache.org/apr/apr-${APR_VERSION}.tar.bz2 \
+    && curl -sSLo /src/httpd/apr-util.tar.bz2 https://dlcdn.apache.org/apr/apr-util-${APR_UTIL_VERSION}.tar.bz2 \
+    && curl -sSLo /src/httpd/fcgid.tar.bz2 https://dlcdn.apache.org/httpd/mod_fcgid/mod_fcgid-${FCGID_VERSION}.tar.bz2 \
+    && tar -xf apr.tar.bz2 \
+    && tar -xf apr-util.tar.bz2 \
+    && tar -xf fcgid.tar.bz2 \
+    && mv apr-${APR_VERSION} ${APACHE_BUILD_DIR}/httpd-${APACHE_VERSION}/srclib/apr \
+    && mv apr-util-${APR_UTIL_VERSION} ${APACHE_BUILD_DIR}/httpd-${APACHE_VERSION}/srclib/apr-util \
+    && cd httpd-${APACHE_VERSION} \
+    && mkdir /usr/local/apache \
+    && ./configure \
+      --with-included-apr --with-included-apr-util \
+      -prefix=/usr/local/apache --enable-fcgid --enable-headers --enable-status \
+      --disable-auth-basic --disable-authn-file --disable-authn-core --disable-authz-user --disable-autoindex --disable-dir \
+    && make && make install \
+    && cd ${APACHE_BUILD_DIR}/mod_fcgid-${FCGID_VERSION} \
+    && APXS=/usr/local/apache/bin/apxs ./configure.apxs \
+    && make && make install
+
 ARG MAPSERVER_BRANCH
 ARG MAPSERVER_REPO=https://github.com/mapserver/mapserver
 
-RUN git clone ${MAPSERVER_REPO} --branch=${MAPSERVER_BRANCH} --depth=100 /src
+RUN git clone ${MAPSERVER_REPO} --branch=${MAPSERVER_BRANCH} --depth=100 /src/mapserver
 
 COPY checkout_release /tmp
-RUN cd /src \
+RUN cd /src/mapserver \
     && /tmp/checkout_release ${MAPSERVER_BRANCH}
 
 COPY instantclient /tmp/instantclient
@@ -39,7 +69,7 @@ RUN --mount=type=cache,target=/var/cache,sharing=locked \
        ln -s libnnz19.so /usr/local/lib/libnnz18.so; \
      fi )
 
-WORKDIR /src/build
+WORKDIR /src/mapserver/build
 RUN if test "${WITH_ORACLE}" = "ON"; then \
       export ORACLE_HOME=/usr/local/lib; \
     fi; \
@@ -71,16 +101,13 @@ LABEL maintainer Camptocamp "info@camptocamp.com"
 SHELL ["/bin/bash", "-o", "pipefail", "-cux"]
 
 # Let's copy a few of the settings from /etc/init.d/apache2
-ENV APACHE_CONFDIR=/etc/apache2 \
-    APACHE_ENVVARS=/etc/apache2/envvars \
+ENV APACHE_CONFDIR=/usr/local/apache/conf \
     # And then a few more from $APACHE_CONFDIR/envvars itself
     APACHE_RUN_USER=www-data \
     APACHE_RUN_GROUP=www-data \
-    APACHE_RUN_DIR=/var/run/apache2 \
-    APACHE_PID_FILE=/var/run/apache2/apache2.pid \
-    APACHE_LOCK_DIR=/var/lock/apache2 \
-    APACHE_LOG_DIR=/var/log/apache2 \
     MS_MAP_PATTERN=^\\/etc\\/mapserver\\/([^\\.][-_A-Za-z0-9\\.]+\\/{1})*([-_A-Za-z0-9\\.]+\\.map)$
+
+COPY --from=builder /usr/local/apache /usr/local/apache/
 
 RUN --mount=type=cache,target=/var/cache,sharing=locked \
     --mount=type=cache,target=/root/.cache \
@@ -88,31 +115,28 @@ RUN --mount=type=cache,target=/var/cache,sharing=locked \
     && printf "Package: *\nPin: release n=jammy\nPin-Priority: -10\n\nPackage: *apache2*\nPin: release n=kinetic\nPin-Priority: 500" > /etc/apt/preferences.d/apache.pref \
     && apt-get update \
     && apt-get upgrade --assume-yes \
-    && apt-get install --assume-yes --no-install-recommends ca-certificates apache2 libapache2-mod-fcgid \
+    && apt-get install --assume-yes --no-install-recommends ca-certificates \
         libfribidi0 librsvg2-2 libpng16-16 libgif7 libfcgi0ldbl \
         libxslt1.1 libprotobuf-c1 libaio1 glibc-tools
 
-RUN a2enmod fcgid headers status \
-    && a2dismod -f auth_basic authn_file authn_core authz_user autoindex dir \
-    && rm /etc/apache2/mods-enabled/alias.conf \
-    && mkdir --mode=go+w --parent ${APACHE_RUN_DIR} ${APACHE_LOCK_DIR} \
-    && mkdir --parent /etc/mapserver \
-    && chmod o+w /var/lib/apache2/fcgid /var/lib/apache2/fcgid/sock \
+RUN mkdir --parent /etc/mapserver \
+    && chmod o+w /usr/local/apache/logs \
     && find "$APACHE_CONFDIR" -type f -exec sed -ri ' \
     s!^(\s*CustomLog)\s+\S+!\1 /proc/self/fd/1!g; \
     s!^(\s*ErrorLog)\s+\S+!\1 /proc/self/fd/2!g; \
     ' '{}' ';' \
-    && sed -ri 's!LogFormat "(.*)" combined!LogFormat "%{us}T %{X-Request-Id}i \1" combined!g' /etc/apache2/apache2.conf \
-    && echo 'ErrorLogFormat "%{X-Request-Id}i [%l] [pid %P] %M"' >> /etc/apache2/apache2.conf \
-    && sed -i -e 's/<VirtualHost \*:80>/<VirtualHost *:8080>/' /etc/apache2/sites-available/000-default.conf \
-    && sed -i -e 's/Listen 80$/Listen 8080/' /etc/apache2/ports.conf
+    && sed -ri 's!LogFormat "(.*)" combined!LogFormat "%{us}T %{X-Request-Id}i \1" combined!g' $APACHE_CONFDIR/httpd.conf \
+    && echo 'ErrorLogFormat "%{X-Request-Id}i [%l] [pid %P] %M"' >> $APACHE_CONFDIR/httpd.conf \
+    && sed -i -e 's/<VirtualHost \*:80>/<VirtualHost *:8080>/' $APACHE_CONFDIR/httpd.conf \
+    && sed -i -e 's/Listen 80$/Listen 8080/' $APACHE_CONFDIR/httpd.conf \
+    && echo 'Include /etc/apache2/conf-enabled/mapserver.conf' >> $APACHE_CONFDIR/httpd.conf
 
 EXPOSE 8080
 
 COPY --from=builder /usr/local/bin /usr/local/bin/
 COPY --from=builder /usr/local/lib /usr/local/lib/
 COPY --from=builder /usr/local/share/mapserver /usr/local/share/mapserver/
-COPY --from=builder /src/share/ogcapi/templates/html-bootstrap4 /usr/local/share/mapserver/ogcapi/templates/html-bootstrap4/
+COPY --from=builder /src/mapserver/share/ogcapi/templates/html-bootstrap4 /usr/local/share/mapserver/ogcapi/templates/html-bootstrap4/
 
 COPY runtime /
 
